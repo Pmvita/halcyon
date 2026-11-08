@@ -65,3 +65,25 @@ describe("provider budgets", () => {
     expect(PROVIDER_BUDGETS.find((item) => item.id === "coingecko")?.perMinute).toBe(8);
   });
 });
+
+describe("signed session cookies", () => {
+  it("authenticates across isolated PGlite instances without a shared sessions row", async () => {
+    const aDir = await mkdtemp(path.join(os.tmpdir(), "halcyon-a-"));
+    const bDir = await mkdtemp(path.join(os.tmpdir(), "halcyon-b-"));
+    try {
+      process.env.SESSION_SECRET = "vitest-session-secret";
+      const a = await Halcyon.open(aDir, new QuoteHub({ fetch: async () => new Response("no", { status: 500 }) }));
+      const { token, user } = await a.login("maya@halcyon.demo", "meridian-desk", "vitest-a");
+      expect(token.startsWith("v1.")).toBe(true);
+
+      const b = await Halcyon.open(bDir, new QuoteHub({ fetch: async () => new Response("no", { status: 500 }) }));
+      const resolved = await b.userByToken(token);
+      expect(resolved?.id).toBe(user.id);
+      const home = await b.home(user.id);
+      expect(home.cashMinor).toBeGreaterThan(0);
+    } finally {
+      await rm(aDir, { recursive: true, force: true });
+      await rm(bDir, { recursive: true, force: true });
+    }
+  });
+});

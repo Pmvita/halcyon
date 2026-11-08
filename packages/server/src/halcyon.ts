@@ -38,6 +38,7 @@ import { Database } from "./db";
 import { journalEntries, journalLines } from "./schema";
 import { seedIfEmpty, wipePersona } from "./seed";
 import { QuoteHub } from "./quotes";
+import { issueSessionToken, verifySessionToken } from "./session-token";
 import { BASKETS, CRYPTO, FX_PAIRS, INSTRUMENTS, findCrypto, findInstrument } from "./universe";
 
 export type PublicUser = {
@@ -148,11 +149,16 @@ export class Halcyon {
       throw new HalcyonError("auth", "That email and password do not match a demo profile.");
     }
     this.failures.delete(key);
-    const token = randomBytes(32).toString("hex");
-    await this.db.run(
-      "insert into sessions (id, user_id, token_hash, device, created_at, expires_at) values ($1,$2,$3,$4,now(), now() + interval '14 days')",
-      [nid("ses"), row.id, sha(token), device.slice(0, 160)],
-    );
+    // Signed cookie carries userId so auth works across serverless instances with isolated PGlite.
+    const token = issueSessionToken(row.id);
+    try {
+      await this.db.run(
+        "insert into sessions (id, user_id, token_hash, device, created_at, expires_at) values ($1,$2,$3,$4,now(), now() + interval '14 days')",
+        [nid("ses"), row.id, sha(token), device.slice(0, 160)],
+      );
+    } catch {
+      // Local session row is best-effort for logout/audit on this instance only.
+    }
     await this.audit(row.id, "login", { device: device.slice(0, 160) });
     const user = await this.user(row.id);
     if (!user) throw new HalcyonError("auth", "Profile missing after login.");
@@ -161,6 +167,9 @@ export class Halcyon {
 
   async userByToken(token: string | undefined): Promise<PublicUser | null> {
     if (!token) return null;
+    const claims = verifySessionToken(token);
+    if (claims) return this.user(claims.userId);
+    // Legacy opaque tokens (pre-signed-cookie) still resolve via the local sessions table.
     const row = await this.db.one<{ user_id: string }>(
       "select user_id from sessions where token_hash = $1 and expires_at > now()",
       [sha(token)],
