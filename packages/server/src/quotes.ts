@@ -36,7 +36,8 @@ export class QuoteHub {
   readonly coalescer = new Coalescer();
   readonly errors = new Map<string, string>();
   readonly upstreamCalls = new Map<string, number>();
-  yields = YIELD_SNAPSHOT.map((row) => ({ ...row, source: "Shipped yield snapshot", status: "Delayed" as const }));
+  yields: Array<(typeof YIELD_SNAPSHOT)[number] & { source: string; status: "Delayed" | "Stale" }> =
+    YIELD_SNAPSHOT.map((row) => ({ ...row, source: "Shipped yield snapshot", status: "Delayed" as const }));
   yieldFetchedAt: string | null = null;
 
   constructor(
@@ -244,7 +245,7 @@ export class QuoteHub {
     const budget = this.budgets.get("fred")!;
     if (!budget.tryEnter()) return;
     try {
-      const next = [];
+      const next: typeof this.yields = [];
       for (const row of YIELD_SNAPSHOT) {
         try {
           const response = await this.fetchImpl(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${row.series}`, {
