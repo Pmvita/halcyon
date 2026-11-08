@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: halcyon
+      POSTGRES_PASSWORD: halcyon
+      POSTGRES_DB: halcyon
+    ports:
+      - "5432:5432"
+    volumes:
+      - halcyon_pg:/var/lib/postgresql/data
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+volumes:
+  halcyon_pg:

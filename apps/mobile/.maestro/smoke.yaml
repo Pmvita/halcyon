@@ -1,0 +1,5 @@
+appId: demo.halcyon.desk
+---
+- launchApp
+- assertVisible: "HALCYON"
+- tapOn: "Enter the desk"

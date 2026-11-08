@@ -1,0 +1,13 @@
+{
+  "name": "halcyon",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "pnpm": { "onlyBuiltDependencies": ["esbuild"] },
+  "scripts": {
+    "dev": "pnpm --filter @halcyon/web dev",
+    "dev:mobile": "pnpm --filter @halcyon/mobile dev",
+    "test": "pnpm --filter @halcyon/domain test && pnpm --filter @halcyon/server test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "seed": "pnpm --filter @halcyon/server seed"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Halcyon",
+    "slug": "halcyon",
+    "scheme": "halcyon",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": ["expo-router", "expo-secure-store"],
+    "ios": { "bundleIdentifier": "demo.halcyon.desk", "supportsTablet": true },
+    "android": { "package": "demo.halcyon.desk" },
+    "extra": { "apiUrl": "http://localhost:3000" }
+  }
+}

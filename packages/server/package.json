@@ -1,0 +1,29 @@
+{
+  "name": "@halcyon/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "seed": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@halcyon/domain": "workspace:*",
+    "drizzle-orm": "^0.44.6",
+    "hash-wasm": "^4.12.0",
+    "ioredis": "^5.8.2",
+    "pdf-lib": "^1.17.1",
+    "postgres": "^3.4.7",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

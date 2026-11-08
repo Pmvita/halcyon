@@ -1,0 +1,9 @@
+{
+  "name": "Halcyon",
+  "short_name": "Halcyon",
+  "start_url": "/home",
+  "display": "standalone",
+  "background_color": "#f4f0e6",
+  "theme_color": "#f4f0e6",
+  "icons": []
+}
