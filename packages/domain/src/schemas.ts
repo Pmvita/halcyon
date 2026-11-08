@@ -10,6 +10,7 @@ export const transferSchema = z.object({
   fromAccountId: z.string().min(1),
   toAccountId: z.string().optional(),
   payeeHandle: z.string().optional(),
+  payeeId: z.string().optional(),
   amount: z.string().min(1),
   kind: z.enum(["internal", "ach", "wire", "person", "bill", "fx", "international"]),
   memo: z.string().max(140).optional(),
@@ -17,6 +18,47 @@ export const transferSchema = z.object({
   confirmed: z.literal(true),
   useOverdraft: z.boolean().optional(),
   scheduledFor: z.string().optional(),
+  recurring: z.enum(["weekly", "biweekly", "monthly"]).optional(),
+});
+
+export const paycheckSchema = z.object({
+  employer: z.string().min(1).max(80).optional(),
+  checkingPct: z.number().min(0).max(100).optional(),
+  hysaPct: z.number().min(0).max(100).optional(),
+  brokerPct: z.number().min(0).max(100).optional(),
+});
+
+export const checkDepositSchema = z.object({
+  accountId: z.string().min(1),
+  amount: z.string().min(1),
+  filename: z.string().min(1).max(180),
+  confirmed: z.literal(true),
+});
+
+export const fundGoalSchema = z.object({
+  goalId: z.string().min(1),
+  fromAccountId: z.string().min(1),
+  amount: z.string().min(1),
+  confirmed: z.literal(true),
+  idempotencyKey: z.string().min(8).max(80),
+});
+
+export const disputeSchema = z.object({
+  entryId: z.string().min(1),
+  reason: z.string().min(8).max(280),
+  confirmed: z.literal(true),
+});
+
+export const nicknameSchema = z.object({
+  accountId: z.string().min(1),
+  nickname: z.string().min(1).max(40),
+});
+
+export const bankingAlertsSchema = z.object({
+  lowBalance: z.boolean(),
+  largePay: z.boolean(),
+  cardSpend: z.boolean(),
+  lowBalanceMinor: z.number().int().min(0).max(10_000_000).optional(),
 });
 
 export const orderSchema = z.object({

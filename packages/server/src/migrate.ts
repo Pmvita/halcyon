@@ -264,4 +264,44 @@ CREATE TABLE IF NOT EXISTS stepups (
   user_id text PRIMARY KEY,
   until timestamptz NOT NULL
 );
+CREATE TABLE IF NOT EXISTS document_downloads (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  kind text NOT NULL,
+  label text NOT NULL,
+  format text NOT NULL,
+  created_at timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS banking_alerts (
+  user_id text PRIMARY KEY,
+  low_balance boolean NOT NULL DEFAULT true,
+  large_pay boolean NOT NULL DEFAULT true,
+  card_spend boolean NOT NULL DEFAULT true,
+  low_balance_minor integer NOT NULL DEFAULT 50000
+);
+CREATE TABLE IF NOT EXISTS recurring_transfers (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  from_account_id text NOT NULL,
+  to_account_id text,
+  payee_id text,
+  amount_minor integer NOT NULL,
+  currency text NOT NULL DEFAULT 'USD',
+  kind text NOT NULL,
+  memo text,
+  cadence text NOT NULL,
+  next_run timestamptz NOT NULL,
+  status text NOT NULL DEFAULT 'active',
+  created_at timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS check_deposits (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  account_id text NOT NULL,
+  amount_minor integer NOT NULL,
+  filename text NOT NULL,
+  status text NOT NULL,
+  available_at timestamptz,
+  created_at timestamptz NOT NULL
+);
 `;

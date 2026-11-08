@@ -313,6 +313,15 @@ async function writeMayaHistory(db: Database): Promise<void> {
       { at: "2026-11-02T15:00:00.000Z", state: "Provisional credit", note: "A simulated provisional credit can be posted from this case. No card network is involved." },
     ]),
   ]);
+  await db.run(
+    `insert into banking_alerts (user_id, low_balance, large_pay, card_spend, low_balance_minor) values ('usr_maya', true, true, true, 50000)
+     on conflict (user_id) do nothing`,
+  );
+  await db.run(
+    `insert into document_downloads (id, user_id, kind, label, format, created_at) values
+     ('doc_seed_oct','usr_maya','statement','October specimen','pdf', now() - interval '3 days')
+     on conflict do nothing`,
+  );
 }
 
 export async function wipePersona(db: Database, persona: "maya" | "andre" | "elena"): Promise<void> {
@@ -333,6 +342,10 @@ export async function wipePersona(db: Database, persona: "maya" | "andre" | "ele
   await db.run(`delete from option_papers where user_id = $1`, [userId]);
   await db.run(`delete from earns where user_id = $1`, [userId]);
   await db.run(`delete from disputes where user_id = $1`, [userId]);
+  await db.run(`delete from document_downloads where user_id = $1`, [userId]);
+  await db.run(`delete from banking_alerts where user_id = $1`, [userId]);
+  await db.run(`delete from recurring_transfers where user_id = $1`, [userId]);
+  await db.run(`delete from check_deposits where user_id = $1`, [userId]);
   if (persona === "andre") {
     await db.run(`delete from accounts where owner_id = 'usr_andre'`);
     await db.run(`update users set intro_seen = false, kyc_status = 'unverified', terms_version = null where id = 'usr_andre'`);

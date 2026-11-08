@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { equitySession, LEGAL } from "@halcyon/domain";
 import { Wordmark } from "@/components/marks";
-import { CommandPalette, ThemeControls } from "@/components/palette";
+import { CommandPalette } from "@/components/palette";
 import { requireUser, halcyon } from "@/lib/session";
 
 const LINKS = [
@@ -35,7 +35,6 @@ export default async function DeskLayout({ children }: { children: React.ReactNo
         <div className="tools">
           <CommandPalette />
           <Link className="tool" href="/inbox">Inbox{unread ? ` (${unread})` : ""}</Link>
-          <ThemeControls theme={user.theme} density={user.density} />
           <Link className="tool" href="/profile">{user.name.split(" ")[0]}</Link>
         </div>
       </header>

@@ -68,11 +68,39 @@ async function handle(req: NextRequest, path: string[]) {
     if (!user) return NextResponse.json({ ok: false, error: { message: "Sign in again." } }, { status: 401 });
     if (key === "home") return NextResponse.json(await app.home(user.id));
     if (key === "banking") return NextResponse.json(await app.banking(user.id));
+    if (key === "banking/activity") {
+      return NextResponse.json({
+        activity: await app.bankingActivity(user.id, {
+          q: req.nextUrl.searchParams.get("q") ?? undefined,
+          accountId: req.nextUrl.searchParams.get("accountId") ?? undefined,
+          category: req.nextUrl.searchParams.get("category") ?? undefined,
+          from: req.nextUrl.searchParams.get("from") ?? undefined,
+          to: req.nextUrl.searchParams.get("to") ?? undefined,
+        }),
+      });
+    }
     if (key === "quotes") {
       const symbols = (req.nextUrl.searchParams.get("symbols") ?? "BTC").split(",");
       const quotes = [];
       for (const symbol of symbols) quotes.push(await app.quotes.quote(symbol, "page", user.replayEnabled));
       return NextResponse.json({ quotes });
+    }
+    if (key === "markets" && req.method === "GET") return NextResponse.json(await app.markets(user.id));
+    if (key === "markets/bars" && req.method === "GET") {
+      const symbol = req.nextUrl.searchParams.get("symbol") ?? "AAPL";
+      const range = req.nextUrl.searchParams.get("range") ?? "3M";
+      const chart = await app.quotes.history(symbol, range);
+      return NextResponse.json({ ok: true, chart });
+    }
+    if (key === "markets/news" && req.method === "GET") {
+      const symbol = req.nextUrl.searchParams.get("symbol") ?? "AAPL";
+      const news = await app.quotes.news(symbol);
+      return NextResponse.json({ ok: true, ...news });
+    }
+    if (key.startsWith("symbol/") && req.method === "GET") {
+      const symbol = key.slice("symbol/".length);
+      const range = req.nextUrl.searchParams.get("range") ?? "3M";
+      return NextResponse.json(await app.symbol(user.id, symbol, range));
     }
     if (key === "search") return NextResponse.json(await app.search(user.id, req.nextUrl.searchParams.get("q") ?? ""));
     if (key === "orders" && req.method === "GET") return NextResponse.json(await app.orders(user.id));
@@ -86,7 +114,7 @@ async function handle(req: NextRequest, path: string[]) {
       return NextResponse.json({ ok: false, error: { message: "Request blocked." } }, { status: 400 });
     }
     if (key === "transfers") return NextResponse.json(await app.transfer(user.id, body));
-    if (key === "paycheck") return NextResponse.json(await app.paycheck(user.id));
+    if (key === "paycheck") return NextResponse.json(await app.paycheck(user.id, body));
     if (key === "funds") return NextResponse.json(await app.addFunds(user.id, Boolean(body.acceptedRisk)));
     if (key === "orders") return NextResponse.json(await app.placeOrder(user.id, body));
     if (key === "orders/cancel") return NextResponse.json(await app.cancel(user.id, String(body.orderId)));
@@ -95,6 +123,12 @@ async function handle(req: NextRequest, path: string[]) {
     if (key === "cards/spend") return NextResponse.json(await app.spend(user.id, body));
     if (key === "cards/settle") return NextResponse.json(await app.settleHold(user.id, String(body.holdId), body.action));
     if (key === "payments/stop") return NextResponse.json(await app.stopPayment(user.id, String(body.paymentId)));
+    if (key === "accounts/nickname") return NextResponse.json(await app.nicknameAccount(user.id, String(body.accountId), String(body.nickname ?? "")));
+    if (key === "disputes") return NextResponse.json(await app.openDispute(user.id, body));
+    if (key === "goals/fund") return NextResponse.json(await app.fundGoal(user.id, body));
+    if (key === "checks/deposit") return NextResponse.json(await app.depositCheck(user.id, body));
+    if (key === "banking/alerts") return NextResponse.json(await app.updateBankingAlerts(user.id, body));
+    if (key === "recurring/stop") return NextResponse.json(await app.stopRecurring(user.id, String(body.recurringId)));
     if (key === "profile") return NextResponse.json(await app.updateProfile(user.id, body));
     if (key === "stepup") return NextResponse.json(await app.stepUp(user.id, String(body.password ?? "")));
     if (key === "kyc") return NextResponse.json(await app.kyc(user.id, String(body.name ?? "")));
@@ -103,7 +137,7 @@ async function handle(req: NextRequest, path: string[]) {
     if (key === "options/expire") return NextResponse.json(await app.expirePaper(user.id, String(body.paperId)));
     if (key === "reset") return NextResponse.json(await app.reset(body.persona));
     if (key === "statements") {
-      const file = await app.statement(user.id, body.format === "csv" ? "csv" : "pdf");
+      const file = await app.statement(user.id, body.format === "csv" ? "csv" : "pdf", typeof body.label === "string" ? body.label : "Current specimen");
       return NextResponse.json(file);
     }
     if (key === "admin/flag" && user.role === "admin") {

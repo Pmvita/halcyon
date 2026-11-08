@@ -52,10 +52,10 @@ export default function CryptoPage() {
       <h1 className="serif" style={{ fontSize: 56 }}>Spot paper</h1>
       <p className="lede">{data?.digest}</p>
       {data?.quotes.map((quote) => (
-        <div className="row" key={quote.symbol}>
+        <a className="row" key={quote.symbol} href={`/markets/${quote.symbol}`}>
           <span>{quote.symbol}<br /><span className="meta">{quote.status} · {quote.source} {quote.detail ? `· ${quote.detail}` : ""}</span></span>
           <span className="num">{quote.last ? quote.last.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—"}</span>
-        </div>
+        </a>
       ))}
       <div className="panel">
         <h2 className="serif">Watch-only</h2>

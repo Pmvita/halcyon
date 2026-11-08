@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ThemeControls } from "@/components/palette";
 import { PostButton } from "@/components/post";
 import { halcyon, requireUser } from "@/lib/session";
 
@@ -12,7 +13,10 @@ export default async function ProfilePage() {
       <p className="kicker">Profile</p>
       <h1 className="serif" style={{ fontSize: 52 }}>{profile.user.name}</h1>
       <p className="lede">{profile.user.email} · {profile.user.kycStatus} · terms {profile.user.termsVersion ?? "not accepted"}</p>
-      <p><Link href="/profile/security">Security</Link> · <Link href="/profile/data-health">Data health</Link> · {user.role === "admin" ? <Link href="/admin">Admin</Link> : null}</p>
+      <p><Link href="/profile/settings">Settings</Link> · <Link href="/profile/security">Security</Link> · <Link href="/profile/data-health">Data health</Link> · {user.role === "admin" ? <Link href="/admin">Admin</Link> : null}</p>
+      <h2 className="serif">Settings</h2>
+      <p className="lede">Theme and density for this desk. Saved to your profile.</p>
+      <ThemeControls theme={user.theme} density={user.density} />
       <h2 className="serif">Reset one person</h2>
       <PostButton href="/api/v1/reset" body={{ persona: "andre" }} confirm="Reset Andre only. Maya’s ledger stays.">Reset Andre</PostButton>
       <PostButton href="/api/v1/reset" body={{ persona: "maya" }} confirm="Reset Maya’s ledger and reseed her history. Andre is untouched.">Reset Maya</PostButton>

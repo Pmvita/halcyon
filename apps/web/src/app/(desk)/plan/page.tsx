@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { formatMoney, formatPct } from "@halcyon/domain";
 import { halcyon, requireUser } from "@/lib/session";
 
@@ -15,7 +16,7 @@ export default async function PlanPage() {
     <>
       <p className="kicker">Plan</p>
       <h1 className="serif" style={{ fontSize: 56 }}>The book</h1>
-      <p className="lede">{plan.note}</p>
+      <p className="lede">{plan.note} Fund goals and envelopes from <Link href="/banking/goals">Banking → Goals</Link>.</p>
       <section className="figures">
         <article><span>Market</span><strong className="num">{formatMoney(Math.round(plan.market * 100))}</strong></article>
         <article><span>Cost</span><strong className="num">{formatMoney(Math.round(plan.cost * 100))}</strong></article>

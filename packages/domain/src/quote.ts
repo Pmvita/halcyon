@@ -16,3 +16,31 @@ export type LiveQuote = {
 };
 
 export type Bar = { t: string; o: number; h: number; l: number; c: number; v: number };
+
+export type ChartMarker = {
+  time: string;
+  position: "aboveBar" | "belowBar" | "inBar";
+  shape: "circle" | "square" | "arrowUp" | "arrowDown";
+  text: string;
+  color?: string;
+};
+
+export type ChartSeries = {
+  bars: Bar[];
+  markers: ChartMarker[];
+  range: string;
+  interval: string;
+  source: string;
+  status: QuoteStatus;
+  asOf: string;
+  detail?: string;
+};
+
+export type NewsItem = {
+  title: string;
+  source: string;
+  time: string;
+  href: string;
+  detail?: string;
+  status: QuoteStatus | "Seed";
+};

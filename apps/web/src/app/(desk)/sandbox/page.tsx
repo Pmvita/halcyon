@@ -5,7 +5,7 @@ export default function SandboxPage() {
     <>
       <p className="kicker">UI inventory</p>
       <h1 className="serif" style={{ fontSize: 52 }}>Sandbox</h1>
-      <p>Buttons, a ticket summary, and both themes. Switch theme from the mast. High contrast is a separate theme, not a filter.</p>
+      <p>Buttons, a ticket summary, and both themes. Switch theme from Profile → Settings. High contrast is a separate theme, not a filter.</p>
       <div className="sandbox-split">
         <div data-theme="light" style={{ background: "#f4f0e6", color: "#1c1914" }}>
           <p className="kicker">Light</p>

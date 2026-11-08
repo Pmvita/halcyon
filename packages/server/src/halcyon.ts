@@ -29,6 +29,7 @@ import {
   treasuryModelPrice,
   wireSameDay,
   type AssetClass,
+  type ChartMarker,
   type JournalDraft,
   type LiveQuote,
   type WorkingOrder,
@@ -228,6 +229,8 @@ export class Halcyon {
 
   async banking(userId: string) {
     await this.settleDue();
+    await this.runRecurring(userId);
+    await this.accrue(userId);
     const user = await this.must(userId);
     const accounts = await this.visibleAccounts(user);
     const balances = await this.balances(accounts.map((account) => account.id));
@@ -235,35 +238,143 @@ export class Halcyon {
       "select account_id, coalesce(sum(amount_minor),0)::int as sum from holds where status = 'pending' group by account_id",
     );
     const payees = await this.db.all("select * from payees where owner_id = $1", [userId]);
-    const payments = await this.db.all("select * from payments where actor_id = $1 order by created_at desc limit 20", [userId]);
+    const payments = await this.db.all("select * from payments where actor_id = $1 order by created_at desc limit 40", [userId]);
     const cards = await this.db.all("select id, account_id, last4, status, frozen, limits from cards where owner_id = $1", [userId]);
-    const holdRows = await this.db.all("select id, account_id, amount_minor, merchant, status, city from holds where status = 'pending'");
-    return {
-      accounts: accounts.map((account) => ({
+    const holdRows = await this.db.all("select id, account_id, amount_minor, merchant, status, city, category, created_at from holds where status = 'pending'");
+    const disputes = await this.db.all("select * from disputes where user_id = $1 order by created_at desc", [userId]);
+    const goals = await this.db.all("select * from goals where user_id = $1", [userId]);
+    const budgets = await this.db.all("select * from budgets where user_id = $1", [userId]);
+    const spend = await this.categorySpend(userId);
+    const documents = await this.db.all("select * from document_downloads where user_id = $1 order by created_at desc limit 20", [userId]);
+    const recurring = await this.db.all("select * from recurring_transfers where user_id = $1 and status = 'active' order by next_run", [userId]);
+    const checkDeposits = await this.db.all("select * from check_deposits where user_id = $1 order by created_at desc limit 10", [userId]);
+    let alertPrefs = await this.db.one<{ low_balance: boolean; large_pay: boolean; card_spend: boolean; low_balance_minor: number }>(
+      "select low_balance, large_pay, card_spend, low_balance_minor from banking_alerts where user_id = $1",
+      [userId],
+    );
+    if (!alertPrefs) {
+      await this.db.run(
+        "insert into banking_alerts (user_id, low_balance, large_pay, card_spend, low_balance_minor) values ($1,true,true,true,50000) on conflict (user_id) do nothing",
+        [userId],
+      );
+      alertPrefs = { low_balance: true, large_pay: true, card_spend: true, low_balance_minor: 50_000 };
+    }
+    const cardSpend = await this.db.one<{ sum: number }>(
+      `select coalesce(sum(abs(l.amount_minor)),0)::int as sum
+       from journal_lines l join journal_entries e on e.id = l.entry_id
+       where e.actor_id = $1 and e.kind = 'card' and l.amount_minor < 0`,
+      [userId],
+    );
+    const cashbackEstimated = Math.round((Number(cardSpend?.sum ?? 0) * FEE.cashbackBps) / 10_000);
+    const household = user.householdId
+      ? await this.db.all<{ id: string; name: string; handle: string | null }>(
+          "select id, name, handle from users where household_id = $1 and role = 'client'",
+          [user.householdId],
+        )
+      : [];
+    const enriched = accounts.map((account) => {
+      const balanceMinor = balances.get(account.id) ?? 0;
+      const heldMinor = Number(holds.find((hold) => hold.account_id === account.id)?.sum ?? 0);
+      const nickname = typeof account.meta?.nickname === "string" ? account.meta.nickname : null;
+      return {
         ...account,
-        balanceMinor: balances.get(account.id) ?? 0,
-        heldMinor: Number(holds.find((hold) => hold.account_id === account.id)?.sum ?? 0),
-      })),
+        nickname,
+        displayName: nickname || account.name,
+        balanceMinor,
+        heldMinor,
+        availableMinor: account.kind === "liability" ? balanceMinor : balanceMinor - heldMinor,
+        demoRouting: "021000021",
+        demoAccountNumber: watermarkAccount(account.id),
+      };
+    });
+    const mortgage = enriched.find((account) => account.type === "mortgage");
+    const escrow = enriched.find((account) => account.type === "escrow");
+    const home = enriched.find((account) => account.type === "home");
+    const cds = enriched.filter((account) => account.type === "cd");
+    const bankTypes = new Set(["checking", "hysa", "joint", "cd", "escrow", "credit", "mortgage", "cash_management"]);
+    return {
+      accounts: enriched,
+      cashAccounts: enriched.filter((account) => bankTypes.has(account.type) || account.type === "credit"),
       payees,
       payments,
       cards,
       holds: holdRows.filter((hold) => accounts.some((account) => account.id === String(hold.account_id))),
-      activity: await this.activity(accounts.map((account) => account.id), 40),
+      activity: await this.activity(accounts.map((account) => account.id), 80),
+      disputes,
+      goals,
+      budgets,
+      spend,
+      documents,
+      recurring,
+      checkDeposits,
+      alertPrefs: {
+        lowBalance: alertPrefs.low_balance,
+        largePay: alertPrefs.large_pay,
+        cardSpend: alertPrefs.card_spend,
+        lowBalanceMinor: Number(alertPrefs.low_balance_minor),
+      },
+      cashbackMinor: cashbackEstimated,
+      household,
+      mortgage: mortgage
+        ? {
+            accountId: mortgage.id,
+            name: mortgage.displayName,
+            balanceMinor: Math.abs(mortgage.balanceMinor),
+            aprBps: mortgage.apr_bps ?? 612,
+            nextPaymentMinor: 280_000,
+            principalMinor: 90_000,
+            interestMinor: 150_000,
+            escrowMinor: 40_000,
+            escrowBalanceMinor: escrow?.balanceMinor ?? 0,
+            homeValueMinor: home?.balanceMinor ?? 0,
+            note: "Amortization snapshot is illustrative. Payments in the demo ledger are scripted.",
+          }
+        : null,
+      cds: cds.map((account) => ({
+        id: account.id,
+        name: account.displayName,
+        balanceMinor: account.balanceMinor,
+        apyBps: account.apy_bps ?? 450,
+        maturityDate: account.maturity_date,
+        termMonths: 12,
+        earlyWithdrawal: "Early withdrawal forfeits the last period of demo interest. No bank is involved.",
+      })),
       routing: "021000021",
       accountNumber: "999001184",
+      demoNotice: "Halcyon is a simulation. Routing and account numbers are watermarked DEMO and are not payable. No customer funds are held.",
+      statements: specimenMonths(),
     };
+  }
+
+  async bankingActivity(userId: string, filters: { q?: string; accountId?: string; category?: string; from?: string; to?: string }) {
+    const banking = await this.banking(userId);
+    const q = (filters.q ?? "").trim().toLowerCase();
+    const from = filters.from ? Date.parse(filters.from) : null;
+    const to = filters.to ? Date.parse(filters.to) : null;
+    return banking.activity.filter((item) => {
+      if (filters.accountId && item.account !== filters.accountId) return false;
+      if (filters.category && item.category !== filters.category) return false;
+      if (q && !`${item.memo} ${item.category}`.toLowerCase().includes(q)) return false;
+      const at = Date.parse(item.at);
+      if (from && Number.isFinite(from) && at < from) return false;
+      if (to && Number.isFinite(to) && at > to + 86_400_000) return false;
+      return true;
+    });
   }
 
   async transfer(userId: string, input: {
     fromAccountId: string;
     toAccountId?: string;
     payeeHandle?: string;
+    payeeId?: string;
     amount: string;
     kind: string;
     memo?: string;
     idempotencyKey: string;
     confirmed: true;
     useOverdraft?: boolean;
+    scheduledFor?: string;
+    recurring?: "weekly" | "biweekly" | "monthly";
   }) {
     const user = await this.must(userId);
     const amountMinor = dollarsToMinor(input.amount);
@@ -277,9 +388,42 @@ export class Halcyon {
       throw new HalcyonError("step_up", "Re-enter your password to send $5,000 or more.");
     }
     const available = (await this.balance(from.id)) - (await this.held(from.id));
-    const memo = sanitizeName(input.memo || defaultMemo(input.kind));
+    let memo = sanitizeName(input.memo || defaultMemo(input.kind));
+    if (input.payeeId) {
+      const payee = await this.db.one<{ name: string; handle: string | null }>("select name, handle from payees where id = $1 and owner_id = $2", [input.payeeId, userId]);
+      if (!payee) throw new HalcyonError("payee", "That payee is not on this profile.");
+      if (!input.memo) memo = sanitizeName(payee.name);
+      if (payee.handle && input.kind === "person") input.payeeHandle = payee.handle;
+    }
+    if (input.recurring) {
+      const next = input.scheduledFor ? new Date(input.scheduledFor) : nextBusinessMorning(new Date());
+      if (Number.isNaN(next.getTime())) throw new HalcyonError("schedule", "Choose a valid next run date.");
+      await this.db.run(
+        `insert into recurring_transfers (id, user_id, from_account_id, to_account_id, payee_id, amount_minor, currency, kind, memo, cadence, next_run, status, created_at)
+         values ($1,$2,$3,$4,$5,$6,'USD',$7,$8,$9,$10,'active',now())`,
+        [nid("recur"), userId, from.id, input.toAccountId ?? null, input.payeeId ?? null, amountMinor, input.kind, memo, input.recurring, next.toISOString()],
+      );
+      await this.notify(userId, "money", "Recurring transfer set", `${formatMoney(amountMinor)} ${input.recurring} was scheduled in the demo.`, "/banking/move");
+      return { status: "scheduled", message: `Recurring ${input.recurring} transfer of ${formatMoney(amountMinor)} was scheduled. Nothing left the demo.` };
+    }
+    if (input.scheduledFor && (input.kind === "internal" || input.kind === "ach" || input.kind === "bill")) {
+      const when = new Date(input.scheduledFor);
+      if (Number.isNaN(when.getTime()) || when.getTime() < Date.now() - 60_000) throw new HalcyonError("schedule", "Pick a future date for the scheduled payment.");
+      if (available < amountMinor) throw new HalcyonError("funds", "Insufficient funds to schedule this payment.");
+      await this.db.run(
+        `insert into payments (id, actor_id, from_account_id, to_account_id, amount_minor, currency, kind, status, memo, idempotency_key, timeline, scheduled_for, created_at)
+         values ($1,$2,$3,$4,$5,'USD',$6,'pending',$7,$8,$9::jsonb,$10,now())`,
+        [nid("pay"), userId, from.id, input.toAccountId ?? null, amountMinor, input.kind === "internal" ? "ach" : input.kind, memo, input.idempotencyKey, JSON.stringify([{ at: new Date().toISOString(), state: "Scheduled", note: "Waiting for the selected date." }]), when.toISOString()],
+      );
+      await this.db.run("insert into holds (id, account_id, amount_minor, currency, status, merchant, city, category, created_at) values ($1,$2,$3,'USD','pending',$4,'','Scheduled',now())", [nid("hold"), from.id, amountMinor, memo]);
+      return { status: "scheduled", message: `Scheduled for ${when.toLocaleDateString("en-US", { timeZone: "America/New_York" })}. Funds are held in the demo until then.` };
+    }
     if (input.kind === "international") {
-      return { status: "corridor", message: "Demo corridor coming. No SWIFT transfer was created.", quote: { amount: formatMoney(amountMinor), fee: "$0 shown because nothing is sent." } };
+      return {
+        status: "corridor",
+        message: "International corridor is not open in this demo. No SWIFT message was created.",
+        quote: { amount: formatMoney(amountMinor), fee: "$0 · corridor closed", corridor: "USD → selected currency (demo only)" },
+      };
     }
     if (input.kind === "person") {
       const handle = sanitizeName(input.payeeHandle ?? "").toLowerCase();
@@ -289,6 +433,7 @@ export class Halcyon {
       if (!dest) throw new HalcyonError("payee", `${person.name} has no checking account in the demo yet.`);
       await this.postCash(userId, from.id, dest.id, amountMinor, available, memo, input.idempotencyKey, input.useOverdraft);
       await this.notify(person.id, "money", "Payment received", `${user.name} sent ${formatMoney(amountMinor)}.`, "/banking");
+      await this.maybeAlertLargePay(userId, amountMinor, memo);
       return { status: "posted", message: `Sent ${formatMoney(amountMinor)} to ${person.name}.` };
     }
     if (input.kind === "ach" || input.kind === "bill") {
@@ -300,6 +445,7 @@ export class Halcyon {
         [nid("pay"), userId, from.id, input.toAccountId ?? null, amountMinor, input.kind, memo, input.idempotencyKey, JSON.stringify([{ at: new Date().toISOString(), state: "Accepted", note: "Waiting for the next business morning." }]), when.toISOString()],
       );
       await this.db.run("insert into holds (id, account_id, amount_minor, currency, status, merchant, city, category, created_at) values ($1,$2,$3,'USD','pending',$4,'', $5, now())", [nid("hold"), from.id, amountMinor, memo, input.kind]);
+      await this.maybeAlertLargePay(userId, amountMinor, memo);
       return { status: "pending", message: `${input.kind === "ach" ? "Bank transfer" : "Bill"} accepted. Available on the next business morning. Nothing left the demo.` };
     }
     if (input.kind === "wire") {
@@ -317,7 +463,15 @@ export class Halcyon {
           { accountId: "acct_house", amountMinor: amountMinor + fee, currency: "USD" },
         ],
       });
-      return { status: sameDay ? "posted" : "scheduled", message: sameDay ? `Wire posted with a ${formatMoney(fee)} fee.` : `Cutoff passed (3:00pm ET). Quoted fee ${formatMoney(fee)}. Posted now in the demo because the corridor is internal.` };
+      await this.maybeAlertLargePay(userId, amountMinor, memo);
+      return {
+        status: sameDay ? "posted" : "scheduled",
+        feeMinor: fee,
+        quote: { amount: formatMoney(amountMinor), fee: formatMoney(fee), sameDay },
+        message: sameDay
+          ? `Wire posted with a ${formatMoney(fee)} domestic fee. No real wire left the demo.`
+          : `Cutoff passed (3:00pm ET). Quoted fee ${formatMoney(fee)}. Posted now in the demo because the corridor is internal.`,
+      };
     }
     const to = accounts.find((account) => account.id === input.toAccountId);
     if (!to) throw new HalcyonError("account", "Choose a destination account.");
@@ -340,24 +494,48 @@ export class Halcyon {
       return { status: "posted", message: `Converted at mid ${converted.appliedRate.toFixed(4)} including the 0.40% demo spread (${formatMoney(converted.spreadMinor, to.currency)}).` };
     }
     await this.postCash(userId, from.id, to.id, amountMinor, available, memo, input.idempotencyKey, input.useOverdraft);
+    await this.maybeAlertLowBalance(userId, from.id);
     return { status: "posted", message: `Moved ${formatMoney(amountMinor)} to ${to.name}.` };
   }
 
-  async paycheck(userId: string) {
+  async paycheck(userId: string, input: { employer?: string; checkingPct?: number; hysaPct?: number; brokerPct?: number } = {}) {
     const user = await this.must(userId);
     const checking = (await this.visibleAccounts(user)).find((account) => account.type === "checking");
     const hysa = (await this.visibleAccounts(user)).find((account) => account.type === "hysa");
     const broker = (await this.visibleAccounts(user)).find((account) => account.type === "brokerage");
     if (!checking) throw new HalcyonError("account", "Open a checking account with demo funds first.");
+    const gross = 1_240_000;
+    let checkingPct = input.checkingPct ?? 55;
+    let hysaPct = hysa ? (input.hysaPct ?? 30) : 0;
+    let brokerPct = broker ? (input.brokerPct ?? 15) : 0;
+    const sum = checkingPct + hysaPct + brokerPct;
+    if (sum <= 0) throw new HalcyonError("split", "Choose at least one destination for the paycheck split.");
+    checkingPct = Math.round((checkingPct / sum) * 100);
+    hysaPct = hysa ? Math.round((hysaPct / sum) * 100) : 0;
+    brokerPct = 100 - checkingPct - hysaPct;
+    const checkingAmt = Math.round((gross * checkingPct) / 100);
+    const hysaAmt = hysa ? Math.round((gross * hysaPct) / 100) : 0;
+    const brokerAmt = gross - checkingAmt - hysaAmt;
+    const employer = sanitizeName(input.employer || "ACME PAYROLL");
     const lines = [
-      { accountId: checking.id, amountMinor: 682_000, currency: "USD" },
-      { accountId: "acct_house", amountMinor: -682_000 - (hysa ? 372_000 : 0) - (broker ? 186_000 : 0), currency: "USD" },
+      { accountId: checking.id, amountMinor: checkingAmt, currency: "USD" },
+      { accountId: "acct_house", amountMinor: -gross, currency: "USD" },
     ];
-    if (hysa) lines.push({ accountId: hysa.id, amountMinor: 372_000, currency: "USD" });
-    if (broker) lines.push({ accountId: broker.id, amountMinor: 186_000, currency: "USD" });
-    await this.post(userId, { kind: "paycheck", memo: "ACME PAYROLL · simulated", actorId: userId, idempotencyKey: nid("payck"), meta: { category: "Income", merchant: "ACME PAYROLL" }, lines });
-    await this.notify(userId, "money", "Paycheck posted", "A simulated paycheck was split across your accounts.", "/banking");
-    return { message: "Paycheck posted. The split is checking, savings, and brokerage when those accounts exist." };
+    if (hysa && hysaAmt) lines.push({ accountId: hysa.id, amountMinor: hysaAmt, currency: "USD" });
+    if (broker && brokerAmt) lines.push({ accountId: broker.id, amountMinor: brokerAmt, currency: "USD" });
+    await this.post(userId, {
+      kind: "paycheck",
+      memo: `${employer} · simulated`,
+      actorId: userId,
+      idempotencyKey: nid("payck"),
+      meta: { category: "Income", merchant: employer, split: { checkingPct, hysaPct, brokerPct } },
+      lines,
+    });
+    await this.notify(userId, "money", "Paycheck posted", `${employer} split ${checkingPct}/${hysaPct}/${brokerPct} across checking, savings, and brokerage.`, "/banking/move");
+    return {
+      message: `Paycheck from ${employer} posted for ${formatMoney(gross)}. Split ${checkingPct}% checking, ${hysaPct}% savings, ${brokerPct}% brokerage.`,
+      split: { checkingPct, hysaPct, brokerPct, grossMinor: gross },
+    };
   }
 
   async addFunds(userId: string, acceptedRisk: boolean) {
@@ -443,14 +621,136 @@ export class Halcyon {
       memo: hold.merchant,
       actorId: userId,
       idempotencyKey: `settle_${holdId}`,
-      meta: { category: hold.category || "Shopping", merchant: hold.merchant },
+      meta: { category: hold.category || "Shopping", merchant: hold.merchant, cashbackMinor: reward },
       lines: [
         { accountId: hold.account_id, amountMinor: -net, currency: "USD" },
         { accountId: "acct_house", amountMinor: net, currency: "USD" },
       ],
     });
     await this.db.run("update holds set status = 'settled' where id = $1", [holdId]);
+    await this.maybeAlertCardSpend(userId, hold.amount_minor, hold.merchant);
     return { message: `Settled ${formatMoney(hold.amount_minor)}. Rewards of ${formatMoney(reward)} posted at 1%.` };
+  }
+
+  async nicknameAccount(userId: string, accountId: string, nickname: string) {
+    const user = await this.must(userId);
+    const accounts = await this.visibleAccounts(user);
+    const account = accounts.find((item) => item.id === accountId);
+    if (!account) throw new HalcyonError("account", "That account is not on this profile.");
+    if (account.owner_id !== userId) throw new HalcyonError("account", "Nicknames for shared household accounts can only be set by the owner in this demo.");
+    const clean = sanitizeName(nickname).slice(0, 40);
+    const meta = { ...(account.meta ?? {}), nickname: clean };
+    await this.db.run("update accounts set meta = $2::jsonb where id = $1", [accountId, JSON.stringify(meta)]);
+    return { message: `Nickname set to ${clean}.`, nickname: clean };
+  }
+
+  async openDispute(userId: string, input: { entryId: string; reason: string; confirmed: true }) {
+    const user = await this.must(userId);
+    const accounts = await this.visibleAccounts(user);
+    const activity = await this.activity(accounts.map((account) => account.id), 120);
+    const entry = activity.find((item) => item.id === input.entryId);
+    if (!entry) throw new HalcyonError("missing", "That activity item was not found on this profile.");
+    const reason = sanitizeName(input.reason);
+    const id = nid("case");
+    const timeline = [
+      { at: new Date().toISOString(), state: "Opened", note: reason },
+      { at: new Date().toISOString(), state: "Review", note: "Demo case only. No card network dispute was filed." },
+    ];
+    await this.db.run(
+      "insert into disputes (id, user_id, account_id, status, reason, timeline, created_at) values ($1,$2,$3,'open',$4,$5::jsonb,now())",
+      [id, userId, entry.account, `${reason} · ${entry.memo}`, JSON.stringify(timeline)],
+    );
+    await this.notify(userId, "security", "Dispute opened", `Case ${id} tracks ${entry.memo}. Provisional credit is simulated only.`, "/banking/disputes");
+    return { id, message: `Dispute ${id} opened for ${entry.memo}. This is a demo timeline, not a network chargeback.` };
+  }
+
+  async fundGoal(userId: string, input: { goalId: string; fromAccountId: string; amount: string; confirmed: true; idempotencyKey: string }) {
+    const user = await this.must(userId);
+    const goal = await this.db.one<{ id: string; name: string; target_minor: number; saved_minor: number }>("select * from goals where id = $1 and user_id = $2", [input.goalId, userId]);
+    if (!goal) throw new HalcyonError("missing", "That savings goal was not found.");
+    const amountMinor = dollarsToMinor(input.amount);
+    const accounts = await this.visibleAccounts(user);
+    const from = accounts.find((account) => account.id === input.fromAccountId);
+    if (!from) throw new HalcyonError("account", "Choose an account you can fund from.");
+    const available = (await this.balance(from.id)) - (await this.held(from.id));
+    if (available < amountMinor) throw new HalcyonError("funds", "Insufficient available balance to fund that goal.");
+    await this.post(userId, {
+      kind: "goal",
+      memo: `Goal · ${goal.name}`,
+      actorId: userId,
+      idempotencyKey: input.idempotencyKey,
+      meta: { category: "Savings", merchant: goal.name, goalId: goal.id },
+      lines: [
+        { accountId: from.id, amountMinor: -amountMinor, currency: "USD" },
+        { accountId: "acct_house", amountMinor: amountMinor, currency: "USD" },
+      ],
+    });
+    const saved = Number(goal.saved_minor) + amountMinor;
+    await this.db.run("update goals set saved_minor = $2 where id = $1", [goal.id, saved]);
+    return {
+      message: `Moved ${formatMoney(amountMinor)} toward ${goal.name}. Progress ${formatMoney(saved)} of ${formatMoney(Number(goal.target_minor))}.`,
+      savedMinor: saved,
+      targetMinor: Number(goal.target_minor),
+    };
+  }
+
+  async depositCheck(userId: string, input: { accountId: string; amount: string; filename: string; confirmed: true }) {
+    const user = await this.must(userId);
+    const accounts = await this.visibleAccounts(user);
+    const account = accounts.find((item) => item.id === input.accountId && (item.type === "checking" || item.type === "joint"));
+    if (!account) throw new HalcyonError("account", "Deposit into a checking or joint account in the demo.");
+    const filename = sanitizeName(input.filename).slice(0, 180);
+    if (/blur/i.test(filename)) throw new HalcyonError("image", "That image looks too blurry for the demo deposit script. Try another file name.");
+    const amountMinor = dollarsToMinor(input.amount);
+    if (amountMinor > 500_000) throw new HalcyonError("limit", "Demo mobile deposit caps at $5,000 per item.");
+    const availableAt = new Date(Date.now() + 2 * 86_400_000);
+    const id = nid("chk");
+    await this.db.run(
+      "insert into check_deposits (id, user_id, account_id, amount_minor, filename, status, available_at, created_at) values ($1,$2,$3,$4,$5,'held',$6,now())",
+      [id, userId, account.id, amountMinor, filename, availableAt.toISOString()],
+    );
+    await this.post(userId, {
+      kind: "check",
+      memo: `Mobile check deposit · ${filename}`,
+      actorId: userId,
+      idempotencyKey: `chk_${id}`,
+      meta: { category: "Deposit", merchant: "Mobile deposit", holdUntil: availableAt.toISOString() },
+      lines: [
+        { accountId: account.id, amountMinor, currency: "USD" },
+        { accountId: "acct_house", amountMinor: -amountMinor, currency: "USD" },
+      ],
+    });
+    await this.notify(
+      userId,
+      "money",
+      "Check accepted (demo)",
+      `${formatMoney(amountMinor)} posted with a simulated hold until ${availableAt.toLocaleDateString("en-US", { timeZone: "America/New_York" })}. The image never leaves this browser session.`,
+      "/banking/deposit",
+    );
+    return {
+      id,
+      message: `Accepted ${formatMoney(amountMinor)}. Funds show immediately with a demo availability message for ${availableAt.toLocaleDateString("en-US", { timeZone: "America/New_York" })}. No image was uploaded to a server queue.`,
+      availableAt: availableAt.toISOString(),
+    };
+  }
+
+  async updateBankingAlerts(userId: string, input: { lowBalance: boolean; largePay: boolean; cardSpend: boolean; lowBalanceMinor?: number }) {
+    await this.must(userId);
+    const threshold = input.lowBalanceMinor ?? 50_000;
+    await this.db.run(
+      `insert into banking_alerts (user_id, low_balance, large_pay, card_spend, low_balance_minor)
+       values ($1,$2,$3,$4,$5)
+       on conflict (user_id) do update set low_balance = $2, large_pay = $3, card_spend = $4, low_balance_minor = $5`,
+      [userId, input.lowBalance, input.largePay, input.cardSpend, threshold],
+    );
+    return { message: "Banking alert preferences saved. Alerts land in Inbox and stay inside the demo." };
+  }
+
+  async stopRecurring(userId: string, recurringId: string) {
+    const row = await this.db.one("select id from recurring_transfers where id = $1 and user_id = $2", [recurringId, userId]);
+    if (!row) throw new HalcyonError("missing", "That recurring transfer was not found.");
+    await this.db.run("update recurring_transfers set status = 'stopped' where id = $1", [recurringId]);
+    return { message: "Recurring transfer stopped." };
   }
 
   async placeOrder(userId: string, input: {
@@ -519,7 +819,18 @@ export class Halcyon {
       await this.db.run("insert into executions (id, order_id, qty, price, liquidity, fee, created_at) values ($1,$2,$3,$4,$5,$6,now())", [nid("exe"), working.id, fill.qty, fill.price, fill.liquidity, fill.fee]);
       await this.notify(userId, "trade", `${symbol} ${matched.order.status}`, `${input.side} ${fill.qty} @ ${fill.price.toFixed(2)} on HALCYON-SIM.`, `/markets/${symbol}`);
     }
-    return { order: { ...matched.order, id: working.id }, quote, venue: "HALCYON-SIM" };
+    return {
+      order: {
+        ...matched.order,
+        id: working.id,
+        avgPrice: fill?.price ?? null,
+        fee: fill?.fee ?? null,
+        venue: "HALCYON-SIM",
+      },
+      quote,
+      venue: "HALCYON-SIM",
+      fill: fill ? { qty: fill.qty, price: fill.price, fee: fill.fee, at: fill.at } : null,
+    };
   }
 
   async cancel(userId: string, orderId: string) {
@@ -554,16 +865,41 @@ export class Halcyon {
     const positions = await this.positionRows(lots, user.replayEnabled);
     const watch = await this.db.all<{ symbol: string }>("select symbol from watch_items where user_id = $1", [userId]);
     const symbols = watch.map((item) => item.symbol);
-    const quotes = symbols.map((symbol) => (findCrypto(symbol) ? null : this.quotes.equityQuote(symbol, user.replayEnabled)));
     const live: LiveQuote[] = [];
     for (const symbol of symbols) {
       if (findCrypto(symbol)) live.push(await Promise.race([this.quotes.quote(symbol, "screener", user.replayEnabled), sleep<LiveQuote>(1200)]).then((quote) => quote ?? this.seedCrypto(symbol)));
       else live.push(this.quotes.equityQuote(symbol, user.replayEnabled));
     }
-    return { positions, watch: live, universe: INSTRUMENTS, baskets: BASKETS, session: equitySession(new Date(), user.replayEnabled), quotesIgnored: quotes.length };
+    const broker = accounts.find((account) => account.type === "brokerage");
+    const buyingPowerMinor = broker ? await this.buyingPower(broker.id) : 0;
+    const openOrders = await this.db.all(
+      "select id, symbol, side, order_type, qty, filled_qty, status, avg_price, created_at from orders where user_id = $1 and status in ('open','partial') order by created_at desc limit 20",
+      [userId],
+    );
+    const screener = INSTRUMENTS.map((item) => {
+      const quote = this.quotes.equityQuote(item.symbol, user.replayEnabled);
+      return {
+        ...item,
+        last: quote.last,
+        changePct: quote.changePct,
+        status: quote.status,
+        source: quote.source,
+        asOf: quote.asOf,
+      };
+    });
+    return {
+      positions,
+      watch: live,
+      universe: screener,
+      baskets: BASKETS,
+      session: equitySession(new Date(), user.replayEnabled),
+      buyingPowerMinor,
+      openOrders,
+      accountId: broker?.id ?? "",
+    };
   }
 
-  async symbol(userId: string, symbol: string) {
+  async symbol(userId: string, symbol: string, range = "3M") {
     const user = await this.must(userId);
     const upper = symbol.toUpperCase();
     const quote = findCrypto(upper)
@@ -571,13 +907,106 @@ export class Halcyon {
       : await this.quotes.quote(upper, "page", user.replayEnabled);
     const inst = findInstrument(upper);
     const crypto = findCrypto(upper);
+    const fx = FX_PAIRS.find((pair) => pair.symbol === upper);
+    const accounts = await this.visibleAccounts(user);
+    const broker = accounts.find((account) => account.type === "brokerage") ?? accounts.find((account) => account.type === "checking");
+    const lots = await this.lotsFor(accounts.map((account) => account.id));
+    const positions = await this.positionRows(lots, user.replayEnabled);
+    const position = positions.find((row) => row.symbol === upper) ?? null;
+    const buyingPowerMinor = broker ? await this.buyingPower(broker.id) : 0;
+    const openOrders = await this.db.all<{
+      id: string;
+      symbol: string;
+      side: string;
+      order_type: string;
+      qty: number;
+      filled_qty: number;
+      limit_price: number | null;
+      status: string;
+      avg_price: number | null;
+      created_at: string;
+    }>(
+      "select id, symbol, side, order_type, qty, filled_qty, limit_price, status, avg_price, created_at from orders where user_id = $1 and symbol = $2 order by created_at desc limit 12",
+      [userId, upper],
+    );
+    const fills = await this.db.all<{ qty: number; price: number; created_at: string; side: string }>(
+      `select e.qty, e.price, e.created_at, o.side
+       from executions e join orders o on o.id = e.order_id
+       where o.user_id = $1 and o.symbol = $2
+       order by e.created_at desc limit 8`,
+      [userId, upper],
+    );
+    const fillMarkers: ChartMarker[] = fills.map((fill) => ({
+      time: new Date(fill.created_at).toISOString(),
+      position: fill.side === "buy" ? "belowBar" : "aboveBar",
+      shape: fill.side === "buy" ? "arrowUp" : "arrowDown",
+      text: `${fill.side === "buy" ? "Buy" : "Sell"} ${Number(fill.qty).toFixed(0)}`,
+      color: fill.side === "buy" ? "#0f5c38" : "#8d2f2a",
+    }));
+    const chart = await Promise.race([
+      this.quotes.history(upper, range, fillMarkers),
+      sleep<null>(4500),
+    ]).then((value) => value ?? {
+      ...(() => {
+        const bars = this.quotes.bars(upper, range);
+        return {
+          bars,
+          markers: fillMarkers,
+          range,
+          interval: range === "1D" ? "5m" : "1d",
+          source: "Halcyon synthetic path",
+          status: "Stale" as const,
+          asOf: new Date().toISOString(),
+          detail: "History fetch timed out. Showing the synthetic path.",
+        };
+      })(),
+    });
+    const newsBundle = await Promise.race([this.quotes.news(upper), sleep<null>(3500)]).then((value) => value ?? {
+      items: [{
+        title: `${upper} news unavailable`,
+        source: "Halcyon",
+        time: new Date().toISOString(),
+        href: `https://www.sec.gov/edgar/search/#/q=${encodeURIComponent(upper)}`,
+        detail: "News fetch timed out.",
+        status: "Unavailable" as const,
+      }],
+      source: "Halcyon",
+      status: "Unavailable" as const,
+      asOf: new Date().toISOString(),
+      detail: "News feed timed out.",
+    });
+    const related = relatedInstruments(upper, inst?.sector);
+    const stats = inst
+      ? {
+          marketCap: inst.marketCap,
+          dividendYield: inst.dividendYield,
+          volume: inst.volume,
+          sector: inst.sector,
+          close: inst.close,
+          currency: inst.currency,
+        }
+      : crypto
+        ? { marketCap: null, dividendYield: 0, volume: null, sector: "Crypto", close: crypto.seed, currency: "USD" }
+        : fx
+          ? { marketCap: null, dividendYield: 0, volume: null, sector: "FX", close: fx.mid, currency: fx.quote }
+          : null;
     return {
       quote,
-      instrument: inst ?? (crypto ? { symbol: upper, name: crypto.name, assetClass: "crypto", about: `${crypto.name} in the curated paper universe.`, currency: "USD", sector: "Crypto", proxy: undefined } : null),
-      bars: this.quotes.bars(upper, "3M"),
-      news: [
-        { title: `${upper} desk brief`, source: "Halcyon seed", time: "Shipped with the demo", href: "https://www.sec.gov/edgar/search/", detail: "Sample headline so the reader is never empty. Follow the source link for a public filing search." },
-      ],
+      instrument: inst ?? (crypto
+        ? { symbol: upper, name: crypto.name, assetClass: "crypto" as const, about: `${crypto.name} in the curated paper universe.`, currency: "USD", sector: "Crypto", proxy: undefined, close: crypto.seed, marketCap: 0, dividendYield: 0, volume: 0 }
+        : fx
+          ? { symbol: upper, name: fx.name, assetClass: "fx" as const, about: `${fx.name} reference pair. Indicative mid only.`, currency: fx.quote, sector: "FX", proxy: undefined, close: fx.mid, marketCap: 0, dividendYield: 0, volume: 0 }
+          : null),
+      bars: chart.bars,
+      chart,
+      news: newsBundle.items,
+      newsMeta: { source: newsBundle.source, status: newsBundle.status, asOf: newsBundle.asOf, detail: newsBundle.detail },
+      stats,
+      position,
+      buyingPowerMinor,
+      accountId: broker?.id ?? "",
+      orders: openOrders,
+      related,
       filings: `https://www.sec.gov/edgar/search/#/q=${encodeURIComponent(upper)}`,
     };
   }
@@ -806,14 +1235,18 @@ export class Halcyon {
     await this.db.run("insert into flags (key, enabled) values ($1,$2) on conflict (key) do update set enabled = $2", [key, enabled]);
   }
 
-  async statement(userId: string, format: "pdf" | "csv") {
+  async statement(userId: string, format: "pdf" | "csv", label = "Current specimen") {
     const banking = await this.banking(userId);
+    await this.db.run(
+      "insert into document_downloads (id, user_id, kind, label, format, created_at) values ($1,$2,'statement',$3,$4,now())",
+      [nid("doc"), userId, label, format],
+    );
     if (format === "csv") {
       const lines = ["date,memo,account,amount"];
       for (const item of banking.activity) {
         lines.push(`${item.at},"${String(item.memo).replace(/"/g, "")}",${item.account},${(Number(item.amountMinor) / 100).toFixed(2)}`);
       }
-      return { mime: "text/csv", filename: "halcyon-specimen.csv", body: lines.join("\n") };
+      return { mime: "text/csv", filename: "halcyon-specimen.csv", body: lines.join("\n"), note: "Specimen CSV. Not a bank statement." };
     }
     const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
     const pdf = await PDFDocument.create();
@@ -822,9 +1255,10 @@ export class Halcyon {
     const ink = rgb(0.11, 0.1, 0.08);
     page.drawText("HALCYON  ·  SPECIMEN STATEMENT", { x: 48, y: 740, size: 16, font, color: ink });
     page.drawText("Simulated balances. Not a bank statement. No FDIC or SIPC coverage.", { x: 48, y: 718, size: 10, font, color: rgb(0.45, 0.3, 0.15) });
-    let y = 680;
+    page.drawText(label, { x: 48, y: 700, size: 10, font, color: ink });
+    let y = 670;
     for (const account of banking.accounts.filter((account) => account.kind !== "equity").slice(0, 10)) {
-      page.drawText(`${account.name}  ${formatMoney(account.balanceMinor, account.currency)}`, { x: 48, y, size: 11, font, color: ink });
+      page.drawText(`${account.displayName ?? account.name}  ${formatMoney(account.balanceMinor, account.currency)}`, { x: 48, y, size: 11, font, color: ink });
       y -= 18;
     }
     y -= 10;
@@ -834,7 +1268,7 @@ export class Halcyon {
       if (y < 72) break;
     }
     const bytes = await pdf.save();
-    return { mime: "application/pdf", filename: "halcyon-specimen.pdf", body: Buffer.from(bytes).toString("base64"), encoding: "base64" };
+    return { mime: "application/pdf", filename: "halcyon-specimen.pdf", body: Buffer.from(bytes).toString("base64"), encoding: "base64", note: "Specimen PDF. Not a bank statement." };
   }
 
   private async applyFill(userId: string, accountId: string, symbol: string, side: "buy" | "sell", qty: number, price: number, fee: number, assetClass: AssetClass) {
@@ -924,10 +1358,79 @@ export class Halcyon {
   }
 
   private async visibleAccounts(user: PublicUser) {
-    return this.db.all<{ id: string; name: string; type: string; kind: string; currency: string; visibility: string; owner_id: string; apy_bps: number | null }>(
-      "select id, name, type, kind, currency, visibility, owner_id, apy_bps from accounts where owner_id = $1 or (visibility = 'shared' and household_id = $2)",
+    return this.db.all<{
+      id: string;
+      name: string;
+      type: string;
+      kind: string;
+      currency: string;
+      visibility: string;
+      owner_id: string;
+      apy_bps: number | null;
+      apr_bps: number | null;
+      credit_limit_minor: number | null;
+      maturity_date: string | null;
+      meta: Record<string, unknown> | null;
+    }>(
+      `select id, name, type, kind, currency, visibility, owner_id, apy_bps, apr_bps, credit_limit_minor, maturity_date, meta
+       from accounts
+       where owner_id = $1 or (visibility = 'shared' and household_id = $2)`,
       [user.id, user.householdId],
     );
+  }
+
+  private async runRecurring(userId: string) {
+    const due = await this.db.all<{
+      id: string;
+      from_account_id: string;
+      to_account_id: string | null;
+      amount_minor: number;
+      kind: string;
+      memo: string | null;
+      cadence: string;
+      next_run: string;
+    }>("select * from recurring_transfers where user_id = $1 and status = 'active' and next_run <= now()", [userId]);
+    for (const item of due) {
+      try {
+        await this.transfer(userId, {
+          fromAccountId: item.from_account_id,
+          toAccountId: item.to_account_id ?? undefined,
+          amount: (Number(item.amount_minor) / 100).toFixed(2),
+          kind: item.kind,
+          memo: item.memo ?? undefined,
+          idempotencyKey: `recur_${item.id}_${item.next_run}`,
+          confirmed: true,
+        });
+      } catch {
+        // Keep the series active; the next banking load can retry after funds return.
+      }
+      const next = new Date(item.next_run);
+      if (item.cadence === "weekly") next.setDate(next.getDate() + 7);
+      else if (item.cadence === "biweekly") next.setDate(next.getDate() + 14);
+      else next.setMonth(next.getMonth() + 1);
+      await this.db.run("update recurring_transfers set next_run = $2 where id = $1", [item.id, next.toISOString()]);
+    }
+  }
+
+  private async maybeAlertLowBalance(userId: string, accountId: string) {
+    const prefs = await this.db.one<{ low_balance: boolean; low_balance_minor: number }>("select low_balance, low_balance_minor from banking_alerts where user_id = $1", [userId]);
+    if (!prefs?.low_balance) return;
+    const available = (await this.balance(accountId)) - (await this.held(accountId));
+    if (available < Number(prefs.low_balance_minor)) {
+      await this.notify(userId, "money", "Low balance alert", `Available balance fell below ${formatMoney(Number(prefs.low_balance_minor))} on a demo account.`, "/banking");
+    }
+  }
+
+  private async maybeAlertLargePay(userId: string, amountMinor: number, memo: string) {
+    const prefs = await this.db.one<{ large_pay: boolean }>("select large_pay from banking_alerts where user_id = $1", [userId]);
+    if (!prefs?.large_pay || amountMinor < 500_000) return;
+    await this.notify(userId, "money", "Large payment alert", `${formatMoney(amountMinor)} · ${memo}. Demo alert only.`, "/banking/move");
+  }
+
+  private async maybeAlertCardSpend(userId: string, amountMinor: number, merchant: string) {
+    const prefs = await this.db.one<{ card_spend: boolean }>("select card_spend from banking_alerts where user_id = $1", [userId]);
+    if (!prefs?.card_spend || amountMinor < 10_000) return;
+    await this.notify(userId, "security", "Card spend alert", `${merchant} settled ${formatMoney(amountMinor)} in the spend simulator.`, "/banking/cards");
   }
 
   private async balance(accountId: string): Promise<number> {
@@ -1125,11 +1628,35 @@ function sumKinds(accounts: { id: string; type: string }[], balances: Map<string
   return accounts.filter(pred).reduce((sum, account) => sum + (balances.get(account.id) ?? 0), 0);
 }
 
+function relatedInstruments(symbol: string, sector?: string) {
+  const peers = INSTRUMENTS.filter((item) => item.symbol !== symbol && (!sector || item.sector === sector)).slice(0, 4);
+  if (peers.length >= 3) return peers.map((item) => ({ symbol: item.symbol, name: item.name, assetClass: item.assetClass, sector: item.sector, close: item.close }));
+  return INSTRUMENTS.filter((item) => item.symbol !== symbol)
+    .slice(0, 4)
+    .map((item) => ({ symbol: item.symbol, name: item.name, assetClass: item.assetClass, sector: item.sector, close: item.close }));
+}
+
 function defaultMemo(kind: string): string {
   if (kind === "wire") return "Domestic wire";
   if (kind === "ach") return "Bank transfer";
   if (kind === "bill") return "Bill payment";
   return "Transfer";
+}
+
+function watermarkAccount(accountId: string): string {
+  const digest = createHash("sha256").update(accountId).digest("hex");
+  return `999${digest.slice(0, 6)}`;
+}
+
+function specimenMonths() {
+  const months: { id: string; label: string; period: string }[] = [];
+  const now = new Date();
+  for (let i = 0; i < 6; i += 1) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const label = d.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    months.push({ id: `stmt_${d.toISOString().slice(0, 7)}`, label, period: d.toISOString().slice(0, 7) });
+  }
+  return months;
 }
 
 async function verifyPassword(password: string, stored: string): Promise<boolean> {

@@ -58,11 +58,27 @@ describe("halcyon service", () => {
     expect(result.order.status).toBe("cancelled");
     expect(result.venue).toBe("HALCYON-SIM");
   });
+
+  it("returns labeled bars and news with zero keys when upstream fails", async () => {
+    const app = await appPromise;
+    const { user } = await app.login("maya@halcyon.demo", "meridian-desk", "vitest");
+    const page = await app.symbol(user.id, "AAPL", "3M");
+    expect(page.chart.bars.length).toBeGreaterThan(10);
+    expect(page.chart.source.length).toBeGreaterThan(0);
+    expect(page.news.length).toBeGreaterThan(0);
+    expect(page.newsMeta.status).toBeTruthy();
+    expect(page.buyingPowerMinor).toBeGreaterThan(0);
+    expect(page.accountId).toBeTruthy();
+  });
 });
 
 describe("provider budgets", () => {
   it("keeps the coingecko cap in config rather than at a call site", () => {
     expect(PROVIDER_BUDGETS.find((item) => item.id === "coingecko")?.perMinute).toBe(8);
+  });
+
+  it("includes a yahoo budget for public chart history", () => {
+    expect(PROVIDER_BUDGETS.find((item) => item.id === "yahoo")?.perMinute).toBe(20);
   });
 });
 

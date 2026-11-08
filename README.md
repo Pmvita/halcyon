@@ -36,7 +36,7 @@ Do not reuse `meridian-desk` anywhere else. It exists only so a reviewer can ent
 4. Open the AAPL options payoff. The chain is a model and stays Delayed.
 5. Open Bonds and read the Treasury ladder. Prices are marked as a model, not a dealer quote.
 6. On Crypto, read a public BTC address such as the genesis address. Do not enter a seed phrase. The screen says watch-only.
-7. Toggle dark or high contrast from the mast.
+7. Toggle dark or high contrast from Profile → Settings.
 8. Download a specimen statement.
 9. Read the fee schedule and the terms.
 10. Reset Andre from Profile. Maya’s ledger stays.
