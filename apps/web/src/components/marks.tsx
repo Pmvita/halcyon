@@ -40,8 +40,8 @@ export function Sign({ value }: { value: number }) {
   }
   if (value > 0) {
     return (
-      <span className="sign profit" aria-hidden="true">
-        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 2 V10 M3 5 L6 2 L9 5" fill="none" stroke="currentColor" /></svg>
+      <span className="sign profit" aria-label="Gain">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2 V10 M3 5 L6 2 L9 5" fill="none" stroke="currentColor" /></svg>
       </span>
     );
   }

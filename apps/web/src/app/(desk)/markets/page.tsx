@@ -1,9 +1,14 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { formatPct } from "@halcyon/domain";
 import { Money } from "@/components/money";
 import { halcyon, requireUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Markets",
+  description: "Positions, watchlist, and HALCYON-SIM tickets for stocks, ETFs, bonds, FX, and options.",
+};
 
 export default async function MarketsPage() {
   const user = await requireUser();

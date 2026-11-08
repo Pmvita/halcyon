@@ -45,6 +45,13 @@ async function handle(req: NextRequest, path: string[]) {
     const { app, user } = await actor();
     if (key === "auth/login" && req.method === "POST") {
       const body = await req.json();
+      if (typeof body.company === "string" && body.company.trim()) {
+        return NextResponse.json({ ok: false, error: { message: "Sign-in blocked." } }, { status: 400 });
+      }
+      const openedAt = Number(body.openedAt);
+      if (Number.isFinite(openedAt) && Date.now() - openedAt < 700) {
+        return NextResponse.json({ ok: false, error: { message: "Wait a moment, then try again." } }, { status: 400 });
+      }
       const result = await app.login(String(body.email ?? ""), String(body.password ?? ""), req.headers.get("user-agent") ?? "web");
       if (body.theme) await app.updateProfile(result.user.id, { theme: body.theme });
       const response = NextResponse.json({ ok: true, intro: !result.user.introSeen, user: result.user, token: result.token });
@@ -75,6 +82,9 @@ async function handle(req: NextRequest, path: string[]) {
     if (key === "health") return NextResponse.json(await app.health());
     if (req.method !== "POST") return NextResponse.json({ ok: false, error: { message: "Not found." } }, { status: 404 });
     const body = await req.json().catch(() => ({}));
+    if (typeof body.company === "string" && body.company.trim()) {
+      return NextResponse.json({ ok: false, error: { message: "Request blocked." } }, { status: 400 });
+    }
     if (key === "transfers") return NextResponse.json(await app.transfer(user.id, body));
     if (key === "paycheck") return NextResponse.json(await app.paycheck(user.id));
     if (key === "funds") return NextResponse.json(await app.addFunds(user.id, Boolean(body.acceptedRisk)));

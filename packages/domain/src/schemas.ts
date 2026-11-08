@@ -34,4 +34,14 @@ export const orderSchema = z.object({
   idempotencyKey: z.string().min(8).max(80),
 });
 
+export const watchAddressSchema = z.object({
+  address: z
+    .string()
+    .trim()
+    .min(14, "Enter a public address.")
+    .max(128, "That address is too long.")
+    .regex(/^(0x[a-fA-F0-9]{40}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{25,87})$/, "Use a public BTC or ETH address. Never enter a seed phrase."),
+  chain: z.enum(["btc", "eth"]).optional(),
+});
+
 export const LEGAL_VERSION = "2026-11-07";

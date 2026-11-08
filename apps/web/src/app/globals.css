@@ -34,6 +34,38 @@ button, input, select { font: inherit; color: inherit; }
 }
 .demo-chip { width: auto; border: 1px solid var(--line); margin: 8px 16px; min-height: 44px; }
 
+.consent-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-end;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 18px;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.consent-banner p { margin: 0.35em 0; max-width: 52ch; }
+.consent-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 860px) {
+  .consent-banner { bottom: calc(56px + env(safe-area-inset-bottom)); }
+}
+.hp {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 .mast {
   display: flex;
   flex-wrap: wrap;

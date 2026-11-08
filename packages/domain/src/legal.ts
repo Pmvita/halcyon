@@ -22,8 +22,10 @@ export const LEGAL: LegalDoc[] = [
     paragraphs: [
       "The demo stores a profile, a password hash, optional simulated KYC images, the ledger, device session records, and inbox items. Images you upload for the fake identity check stay in the demo data directory and are deleted when you reset or delete the persona.",
       "Halcyon does not sell data and does not use it for advertising. There are no third-party trackers. A first-party, cookieless analytics toggle is off by default and, if you turn it on, stores only anonymous event counts in this browser.",
+      "Cookies and local storage used by this build: a first-party httpOnly session cookie named halcyon_session (set only after you sign in, SameSite=Lax, Secure in production); localStorage keys for theme and density preferences; sessionStorage for the demo disclosure banner dismiss state; and localStorage for your cookie-consent choice. No advertising or cross-site tracking cookies are set.",
       "Provider API keys, if you add them later, live in server environment variables. They are not written into the browser. The data-health page shows budgets and errors, never secrets.",
       "You can reset one persona without touching the other, or delete the local data directory. Retention is the life of this demo install. The contact method is the in-app outbox. This build does not send real email.",
+      "You can clear browser storage to remove preference and consent records. Signing out ends the session cookie. For questions about this demo’s privacy practices, use the in-app outbox; this build does not send real email replies.",
     ],
   },
   {

@@ -2,17 +2,51 @@ import type { Metadata, Viewport } from "next";
 import { Fraunces, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import { DemoBanner } from "@/components/banner";
+import { ConsentBanner } from "@/components/consent";
 import { RegisterSW } from "@/components/sw";
+import { siteUrl } from "@/lib/site";
 
-const sans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-sans" });
-const serif = Fraunces({ subsets: ["latin"], variable: "--font-serif" });
-const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
+const sans = IBM_Plex_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-sans",
+  display: "swap",
+});
+const serif = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  display: "swap",
+});
+const mono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-mono",
+  display: "swap",
+});
+
+const base = siteUrl();
 
 export const metadata: Metadata = {
-  title: { default: "Halcyon", template: "%s · Halcyon" },
-  description: "One desk for cash, markets, and crypto. A simulated private client.",
+  metadataBase: new URL(base),
+  title: { default: "Halcyon — Private desk", template: "%s · Halcyon" },
+  description: "One desk for cash, markets, and crypto. A simulated private client with real market marks and journaled balances.",
   applicationName: "Halcyon",
-  manifest: "/manifest.json",
+  keywords: ["Halcyon", "private desk", "demo banking", "simulated trading"],
+  openGraph: {
+    title: "Halcyon — Private desk",
+    description: "One desk for cash, markets, and crypto. Simulated balances. Real market data where available.",
+    type: "website",
+    siteName: "Halcyon",
+  },
+  twitter: {
+    card: "summary",
+    title: "Halcyon — Private desk",
+    description: "One desk for cash, markets, and crypto. A simulated private client.",
+  },
+  icons: {
+    icon: [{ url: "/icon" }, { url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-icon" }],
+  },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#f4f0e6" };
@@ -28,6 +62,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <DemoBanner />
         <RegisterSW />
         {children}
+        <ConsentBanner />
       </body>
     </html>
   );

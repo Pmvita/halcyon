@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { formatPct } from "@halcyon/domain";
 import { Meridian } from "@/components/marks";
@@ -5,6 +6,10 @@ import { Money, QuoteStatus } from "@/components/money";
 import { halcyon, requireUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Home",
+  description: "Net worth, cash, investments, and crypto on the Halcyon demo desk.",
+};
 
 export default async function HomePage() {
   const user = await requireUser();

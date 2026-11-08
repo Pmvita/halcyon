@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Money } from "@/components/money";
 import { halcyon, requireUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Banking",
+  description: "Internal ledger accounts, transfers, cards, and statements on the Halcyon demo desk.",
+};
 
 export default async function BankingPage() {
   const user = await requireUser();

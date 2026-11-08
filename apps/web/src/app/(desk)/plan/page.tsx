@@ -1,7 +1,12 @@
+import type { Metadata } from "next";
 import { formatMoney, formatPct } from "@halcyon/domain";
 import { halcyon, requireUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Plan",
+  description: "Budgets, goals, and the marked book for the Halcyon demo household.",
+};
 
 export default async function PlanPage() {
   const user = await requireUser();

@@ -1,9 +1,9 @@
+import type { Metadata } from "next";
 import Link from "next/link";
-import { equitySession } from "@halcyon/domain";
+import { equitySession, LEGAL } from "@halcyon/domain";
 import { Wordmark } from "@/components/marks";
 import { CommandPalette, ThemeControls } from "@/components/palette";
 import { requireUser, halcyon } from "@/lib/session";
-import { LEGAL } from "@halcyon/domain";
 
 const LINKS = [
   ["/home", "Home"],
@@ -12,6 +12,10 @@ const LINKS = [
   ["/crypto", "Crypto"],
   ["/plan", "Plan"],
 ];
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export default async function DeskLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();

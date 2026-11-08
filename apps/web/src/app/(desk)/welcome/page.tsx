@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 export default function WelcomePage() {
@@ -18,6 +19,13 @@ export default function WelcomePage() {
         <article><span>Invest</span><strong className="serif">Fill against the tape</strong></article>
         <article><span>Crypto</span><strong className="serif">Watch, don’t custody</strong></article>
       </div>
+      <p className="lede">
+        Entering accepts the current{" "}
+        <Link href="/legal/terms">Terms</Link>
+        {" "}and{" "}
+        <Link href="/legal/privacy">Privacy</Link>
+        {" "}notice for this demo desk.
+      </p>
       <button className="btn-solid" type="button" onClick={() => void enter()}>Enter the desk</button>
     </>
   );
