@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   FEE,
@@ -67,14 +68,45 @@ function sha(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+/** Writable PGlite path. On Vercel/Lambda cwd is read-only; /tmp survives warm instances only (cold starts reseed — fine for the demo). */
 export function workspaceDataDir(): string {
   if (process.env.HALCYON_DATA) return process.env.HALCYON_DATA;
+
+  const tmpDir = path.join(os.tmpdir(), "halcyon", "pglite");
+  if (isServerlessReadonlyFs()) return tmpDir;
+
   let dir = process.cwd();
   for (let i = 0; i < 6; i += 1) {
-    if (fs.existsSync(path.join(dir, "pnpm-workspace.yaml"))) return path.join(dir, ".data", "pglite");
+    if (fs.existsSync(path.join(dir, "pnpm-workspace.yaml"))) {
+      const candidate = path.join(dir, ".data", "pglite");
+      return isPathWritable(candidate) ? candidate : tmpDir;
+    }
     dir = path.dirname(dir);
   }
-  return path.join(process.cwd(), ".data", "pglite");
+
+  const cwdCandidate = path.join(process.cwd(), ".data", "pglite");
+  return isPathWritable(cwdCandidate) ? cwdCandidate : tmpDir;
+}
+
+function isServerlessReadonlyFs(): boolean {
+  return Boolean(
+    process.env.VERCEL ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME ||
+      process.env.LAMBDA_TASK_ROOT ||
+      process.env.NOW_REGION,
+  );
+}
+
+function isPathWritable(dir: string): boolean {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.w-${process.pid}`);
+    fs.writeFileSync(probe, "1");
+    fs.unlinkSync(probe);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export class Halcyon {
@@ -86,9 +118,16 @@ export class Halcyon {
   }
 
   static async open(dataDir: string, quotes?: QuoteHub): Promise<Halcyon> {
-    fs.mkdirSync(dataDir, { recursive: true });
-    const db = await Database.open(dataDir);
+    let dir = dataDir;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch {
+      dir = path.join(os.tmpdir(), "halcyon", "pglite");
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const db = await Database.open(dir);
     const app = new Halcyon(db, quotes);
+    // seedIfEmpty is a no-op when /tmp still has data from a warm instance; cold starts reseed the demo.
     await seedIfEmpty(db);
     return app;
   }

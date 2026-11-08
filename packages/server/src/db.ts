@@ -12,8 +12,15 @@ export class Database {
   ) {}
 
   static async open(dataDir: string): Promise<Database> {
-    const pg = new PGlite(dataDir);
-    await pg.waitReady;
+    let pg: PGlite;
+    try {
+      pg = new PGlite(dataDir);
+      await pg.waitReady;
+    } catch {
+      // Prefer /tmp persistence; fall back to memory if the FS backend still fails on Lambda.
+      pg = new PGlite();
+      await pg.waitReady;
+    }
     await pg.exec(migrateSql);
     const orm = drizzle(pg, { schema });
     return new Database(pg, orm);

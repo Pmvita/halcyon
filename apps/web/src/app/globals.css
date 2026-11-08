@@ -58,12 +58,29 @@ button, input, select { font: inherit; color: inherit; }
 @media (max-width: 860px) {
   .consent-banner { bottom: calc(56px + env(safe-area-inset-bottom)); }
 }
+/* Spam honeypot — must stay visually hidden; bots still see "Company" in the DOM. */
 .hp {
-  position: absolute;
-  left: -10000px;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.hp input {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 .mast {
@@ -150,7 +167,7 @@ h1 { font-size: clamp(40px, 6vw, 72px); line-height: 0.95; margin: 8px 0; }
   min-height: 100vh; display: grid; grid-template-columns: 1.1fr 0.9fr;
 }
 .login-copy, .login-form { padding: 48px 40px; }
-.login-form { border-left: 1px solid var(--line); }
+.login-form { position: relative; border-left: 1px solid var(--line); overflow: hidden; }
 .persona { display: flex; justify-content: space-between; width: 100%; border: 0; border-top: 1px solid var(--line); background: transparent; min-height: 64px; text-align: left; cursor: pointer; padding: 10px 0; }
 .sandbox-split { display: grid; grid-template-columns: 1fr 1fr; }
 .sandbox-split > div { padding: 20px; }
