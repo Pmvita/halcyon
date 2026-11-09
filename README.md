@@ -1,4 +1,6 @@
-# Halcyon
+﻿# Halcyon
+
+**Live demo:** https://halcyon-financial.vercel.app
 
 One desk for cash, markets, and crypto. Halcyon is a simulated private client. Balances, cards, transfers, and trades settle on an internal double-entry ledger. Quotes that can be fetched from public sources are real, and every quote shows its source, age, and status.
 
